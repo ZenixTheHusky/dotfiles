@@ -1,5 +1,4 @@
-#Put this file in C:\Users\<USERNAME>\Documents\MicrosoftPowerShell\Microsoft.PowerShell_profile.ps1
-#Anything that takes flags needs to be made a function before having an alias set.
+#Put this file in C:\Users\<USERNAME>\Documents\MicrosoftPowerShell\
 
 <# 
     1. Check if Payara has started
@@ -46,23 +45,29 @@ Function Grant-NonSecure-Maven-Mirrors {
         # Using the namespace, select the mirror node and remove it
         $mirror = $settingsXML.SelectSingleNode($XPathMirror, $mgr)
         $mirrors = $settingsXML.SelectSingleNode($XPathMirrors, $mgr)
-        [void] $mirrors.RemoveChild($mirror)
+
+        try{
+            #Try removing the mirror. Will error out if mirror node does not exist.
+            [void] $mirrors.RemoveChild($mirror)
+        }
+        catch [System.Management.Automation.MethodInvocationException]{
+            #If mirror node does not exist, unsecure maven repos will be allowed so we create the flag anyway.
+            Write-Host "Mirror node not found. Nothing to save." -ForegroundColor Yellow
+        }
 
         # Save the new XML back to the settings file (this requires admin elevation). Then write the blank file to use as a completion flag.
         $settingsXML.save($env:M2_HOME + "\conf\settings.xml")
         Write-Output $null >> $env:M2_HOME\conf\STFC_UsersCompileDeploy_RunFlag
+        Write-Host "Flag created." -ForegroundColor Green
     }
     catch [System.Management.Automation.ItemNotFoundException] {
         Write-Host "Failed to open the Maven settings file in" $env:M2_HOME\conf\settings.xml -ForegroundColor Red
     }
-    catch [System.Management.Automation.MethodInvocationException]{
-        Write-Host "Mirror node not found. Nothing to save." -ForegroundColor Yellow
-    }    
     
 }
 
 Function Start-Payara {
-    Write-Host "Starting Payara..." -ForegroundColor Green
+    Write-Host "`nStarting Payara..." -ForegroundColor Green
 
     asadmin start-domain --domaindir C:\payara\domains domain1
 }
@@ -71,7 +76,7 @@ Function Stop-Payara {
 }
 
 Function Start-LocalDB {
-    Write-Host "Checking Local-DB..." -ForegroundColor DarkYellow
+    Write-Host "`nChecking Local-DB..." -ForegroundColor DarkYellow
     $container_name = "docker-orchestration_bisapps-db_1"
     $check = wsl docker container inspect -f '{{.State.Status}}' $container_name
     if ( $check -eq "running" ) {
@@ -79,13 +84,25 @@ Function Start-LocalDB {
     } else {
         Write-Host "$container_name not started. Starting in background..." -ForegroundColor DarkYellow
         Start-Job -Name $container_name -ScriptBlock {fba-compose up bisapps-db}
-        Write-Host "$container_name started." -ForegroundColor Green
+        Write-Host "`n$container_name started.`n" -ForegroundColor Green
     }
 
 }
 
+Function Stop-LocalDB {
+    Write-Host "Checking and stopping Local-DB..." -ForegroundColor DarkYellow
+    $container_name = "docker-orchestration_bisapps-db_1"
+    $check = wsl docker container inspect -f '{{.State.Status}}' $container_name
+
+    if ( $check -eq "running" ) {
+        #Stop docker within WSL, then stop the job from powershell.
+        wsl docker container stop $container_name
+        stop-job $container_name; remove-job $container_name
+    }
+}
+
 Function Remove-Payara-WARs {
-    # Undeploys all user WARs from Payara by filtering the output of {@code asadmin list-applications}
+    # Undeploys all user WARs from Payara by filtering the output of `asadmin list-applications`
     #  using the Select-String statement
 
     Write-Host "Removing old WAR files from Payara..." -ForegroundColor Green
@@ -100,7 +117,7 @@ Function Remove-Payara-WARs {
 }
 
 Function Install-Payara-WARs {
-    Write-Host "Deploying User WAR files to Payara..." -ForegroundColor Green 
+    Write-Host "`nDeploying User WAR files to Payara..." -ForegroundColor Green 
     asadmin deploy C:\Programming\Users\users\users-frontend-war\target\*.war;
     asadmin deploy C:\Programming\Users\users\users-services-war\target\*.war;
 }
@@ -112,23 +129,16 @@ Function compileUsers {
 
 Function deployWars {
     Start-LocalDB
-    if (-not(Test-Path -Path $env:M2_HOME\conf\STFC_UsersCompileDeploy_RunFlag -PathType Leaf)) {
-        Write-Host "A Mirror blocking Maven's access to HTTP servers must be removed." -ForegroundColor DarkYellow
-        Write-Host "Press Enter and type in your 03 account details. This only has to be done once." -ForegroundColor DarkYellow
-        pause
-        $UACProcess = Start-Process powershell -ArgumentList {-command "&{. C:\Users\hyn87611\Documents\WindowsPowerShell\STFC_UsersCompileDeploy.ps1; Grant-NonSecure-Maven-Mirrors}" -PassThru -Wait} -verb RunAs
-        #$UACProcess.GetType().GetField('exitCode', 'NonPublic, Instance').GetValue($UACProcess)
-        Write-Host "Done." -ForegroundColor Green
-    }
-
+    #if (-not(Test-Path -Path $env:M2_HOME\conf\STFC_UsersCompileDeploy_RunFlag -PathType Leaf)) {
+    #    Write-Host "A Mirror blocking Maven's access to HTTP servers must be removed." -ForegroundColor DarkYellow
+    #    Write-Host "Please press Enter now, then type in your 03 account details. This only has to be done once." -ForegroundColor DarkYellow
+    #    pause
+    #    $UACProcess = Start-Process powershell -ArgumentList {-command "&{. C:\Users\hyn87611\Documents\WindowsPowerShell\STFC_UsersCompileDeploy.ps1; Grant-NonSecure-Maven-Mirrors}" -PassThru -Wait} -verb RunAs
+    #    #$UACProcess.GetType().GetField('exitCode', 'NonPublic, Instance').GetValue($UACProcess)
+    #    Write-Host "Done." -ForegroundColor Green
+    #}
     & compileUsers
     & Start-Payara
-    & Start-LocalDB
     & Remove-Payara-WARs
     & Install-Payara-WARs
 }
-
-# if (!(Test-Path -Path $PROFILE)) {
-#     New-Item –Path $Profile –Type File
-#     Add-Content $PROFILE $env:USERPROFILE'\Documents\WindowsPowerShell\STFC_UsersCompileDeploy.ps1'
-# }
