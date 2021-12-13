@@ -76,36 +76,20 @@ Function Stop-Payara {
 }
 
 Function Start-LocalDB {
-    Write-Host "`nChecking Local-DB..." -ForegroundColor DarkYellow
-    $container_name = "docker-orchestration_bisapps-db_1"
-    $check = wsl docker container inspect -f '{{.State.Status}}' $container_name
-    if ( $check -eq "running" ) {
-        Write-Host "$container_name already started!" -ForegroundColor Green
-    } else {
-        Write-Host "$container_name not started. Starting in background..." -ForegroundColor DarkYellow
-        Start-Job -Name $container_name -ScriptBlock {fba-compose up bisapps-db}
-        Write-Host "`n$container_name started.`n" -ForegroundColor Green
-    }
-
+    Write-Host "`nStarting Local-DB..." -ForegroundColor DarkYellow
+    fba-compose --log-level error up -d bisapps-db
 }
 
 Function Stop-LocalDB {
-    Write-Host "Checking and stopping Local-DB..." -ForegroundColor DarkYellow
-    $container_name = "docker-orchestration_bisapps-db_1"
-    $check = wsl docker container inspect -f '{{.State.Status}}' $container_name
-
-    if ( $check -eq "running" ) {
-        #Stop docker within WSL, then stop the job from powershell.
-        wsl docker container stop $container_name
-        stop-job $container_name; remove-job $container_name
-    }
+    Write-Host "`nStopping Local-DB..." -ForegroundColor DarkYellow
+    fba-compose --log-level error stop bisapps-db
 }
 
 Function Remove-Payara-WARs {
     # Undeploys all user WARs from Payara by filtering the output of `asadmin list-applications`
     #  using the Select-String statement
 
-    Write-Host "Removing old WAR files from Payara..." -ForegroundColor Green
+    Write-Host "`nRemoving old WAR files from Payara..." -ForegroundColor Green
     
     $apps = asadmin list-applications; 
     $apps_concat = Out-String -InputObject $apps -Stream | Select-String "users"; 
@@ -123,22 +107,33 @@ Function Install-Payara-WARs {
 }
 
 Function compileUsers {
-    Write-Host "Compiling Users project..." -ForegroundColor Green 
+    Write-Host "`nCompiling Users project..." -ForegroundColor Green 
     mvn clean install -f C:\Programming\Users\users
 }
 
+Function publishAuth {
+    $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+    if( -not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        Write-Host "`nSession not in admin session. Attempting to open new admin session..." -ForegroundColor DarkYellow
+        Start-Process powershell -verb RunAs -ArgumentList {" & 'C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe' C:\programming\users\Authenticate\Authenticate.sln /t:Restore,Rebuild /p:Configuration=Debug /p:DeployOnBuild=true /p:PublishProfile=C:\Programming\Users\Authenticate\AuthenticateWebApp\Properties\PublishProfiles\Local-Users.pubxml -verbosity:minimal; Start-Sleep -s 1"} -Wait;
+    }
+    else {
+        Write-Host "`nCompiling Authenicate" -ForegroundColor Green
+        & "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe" C:\programming\users\Authenticate\Authenticate.sln /t:Restore,Rebuild /p:Configuration=Debug /p:DeployOnBuild=true /p:PublishProfile=C:\Programming\Users\Authenticate\AuthenticateWebApp\Properties\PublishProfiles\Local-Users.pubxml -verbosity:minimal
+    }
+}
+
 Function deployWars {
+    param (
+        [switch]$Publish
+    )
     Start-LocalDB
-    #if (-not(Test-Path -Path $env:M2_HOME\conf\STFC_UsersCompileDeploy_RunFlag -PathType Leaf)) {
-    #    Write-Host "A Mirror blocking Maven's access to HTTP servers must be removed." -ForegroundColor DarkYellow
-    #    Write-Host "Please press Enter now, then type in your 03 account details. This only has to be done once." -ForegroundColor DarkYellow
-    #    pause
-    #    $UACProcess = Start-Process powershell -ArgumentList {-command "&{. C:\Users\hyn87611\Documents\WindowsPowerShell\STFC_UsersCompileDeploy.ps1; Grant-NonSecure-Maven-Mirrors}" -PassThru -Wait} -verb RunAs
-    #    #$UACProcess.GetType().GetField('exitCode', 'NonPublic, Instance').GetValue($UACProcess)
-    #    Write-Host "Done." -ForegroundColor Green
-    #}
     & compileUsers
     & Start-Payara
     & Remove-Payara-WARs
     & Install-Payara-WARs
+    if ($Publish) {
+        & publishAuth 
+    }
+    Write-Host "`nDone." -ForegroundColor Green
 }
