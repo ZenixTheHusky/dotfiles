@@ -29,21 +29,6 @@ function U
  
     throw "Invalid character code $Code"
 }
-## STFC Functions
-
-Function payara-start {
-    asadmin start-domain --domaindir C:\payara\domains domain1
-}
-Function payara-stop {
-    asadmin stop-domain --domaindir c:\payara\domains
-}
-Function payara-deploy {
-    asadmin deploy "C:\Programming\Users\users\users-frontend-war\target\*.war"
-    asadmin deploy "C:\Programming\Users\users\users-services-war\target\*.war"
-}
-Function local-db {
-    fba-compose pull bisapps-db; fba-compose up bisapps-db
-}
 
 #Set Aliases. Type these into PowerShell to start the functions above.
 SET-ALIAS -Name PsAdmin         -Value openpsadmin          #Open a new PowerShell Window as Admin
